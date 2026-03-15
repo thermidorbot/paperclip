@@ -116,6 +116,14 @@ const REPO_ROOT = path.resolve(__dirname, "../../..");
 
 const BUNDLED_PLUGIN_EXAMPLES: AvailablePluginExample[] = [
   {
+    packageName: "@paperclipai/plugin-smsi-command-center",
+    pluginKey: "smsi.command-center",
+    displayName: "SMSI Command Center",
+    description: "Operational dashboard widget for SMSI agent fleet health and issue flow.",
+    localPath: "packages/plugins/smsi-command-center",
+    tag: "example",
+  },
+  {
     packageName: "@paperclipai/plugin-hello-world-example",
     pluginKey: "paperclip.hello-world-example",
     displayName: "Hello World Widget (Example)",
