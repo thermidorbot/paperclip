@@ -56,16 +56,14 @@ import {
   ChevronRight,
   ChevronDown,
   ArrowLeft,
-  ImageUp,
-  X,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import { AgentIcon, AgentIconPicker } from "../components/AgentIconPicker";
+import { AgentIcon } from "../components/AgentIconPicker";
+import { AvatarEditorDialog } from "../components/AvatarEditorDialog";
 import { RunTranscriptView, type TranscriptMode } from "../components/transcript/RunTranscriptView";
 import { isUuidLike, type Agent, type HeartbeatRun, type HeartbeatRunEvent, type AgentRuntimeState, type LiveEvent, type ActivityEvent } from "@paperclipai/shared";
 import { redactHomePathUserSegments, redactHomePathUserSegmentsInValue } from "@paperclipai/adapter-utils";
 import { agentRouteRef } from "../lib/utils";
-import { normalizeAvatarImage } from "../lib/avatar-image";
 
 const runStatusIcons: Record<string, { icon: typeof CheckCircle2; color: string }> = {
   succeeded: { icon: CheckCircle2, color: "text-green-600 dark:text-green-400" },
@@ -233,6 +231,20 @@ function asNonEmptyString(value: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+async function canvasToPngFile(canvas: HTMLCanvasElement, fileName: string): Promise<File> {
+  const blob = await new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((result) => {
+      if (!result) {
+        reject(new Error("Failed to encode avatar image"));
+        return;
+      }
+      resolve(result);
+    }, "image/png");
+  });
+  const safeName = fileName.trim().length > 0 ? fileName.replace(/\.[^/.]+$/, "") : "avatar";
+  return new File([blob], `${safeName}.png`, { type: "image/png" });
+}
+
 export function AgentDetail() {
   const { companyPrefix, agentId, tab: urlTab, runId: urlRunId } = useParams<{
     companyPrefix?: string;
@@ -248,10 +260,14 @@ export function AgentDetail() {
   const navigate = useNavigate();
   const [actionError, setActionError] = useState<string | null>(null);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [avatarDialogOpen, setAvatarDialogOpen] = useState(false);
+  const [avatarObjectUrl, setAvatarObjectUrl] = useState<string | null>(null);
+  const [avatarEditorImage, setAvatarEditorImage] = useState<string | null>(null);
+  const [avatarFileName, setAvatarFileName] = useState("avatar");
+  const [avatarScale, setAvatarScale] = useState(1);
   const activeView = urlRunId ? "runs" as AgentDetailView : parseAgentDetailView(urlTab ?? null);
   const [configDirty, setConfigDirty] = useState(false);
   const [configSaving, setConfigSaving] = useState(false);
-  const avatarInputRef = useRef<HTMLInputElement | null>(null);
   const saveConfigActionRef = useRef<(() => void) | null>(null);
   const cancelConfigActionRef = useRef<(() => void) | null>(null);
   const { isMobile } = useSidebar();
@@ -388,24 +404,12 @@ export function AgentDetail() {
     },
   });
 
-  const updateIcon = useMutation({
-    mutationFn: (icon: string) => agentsApi.update(agentLookupRef, { icon }, resolvedCompanyId ?? undefined),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(routeAgentRef) });
-      queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(agentLookupRef) });
-      if (resolvedCompanyId) {
-        queryClient.invalidateQueries({ queryKey: queryKeys.agents.list(resolvedCompanyId) });
-      }
-    },
-  });
-
   const updateAvatar = useMutation({
     mutationFn: async (file: File) => {
       if (!resolvedCompanyId || !agent?.id) throw new Error("Agent company is not selected");
-      const normalized = await normalizeAvatarImage(file);
       const asset = await assetsApi.uploadImage(
         resolvedCompanyId,
-        normalized,
+        file,
         `agents/${agent.id}/avatar`,
       );
       const existingMetadata = asRecord(agent.metadata) ?? {};
@@ -428,26 +432,53 @@ export function AgentDetail() {
     },
   });
 
-  const clearAvatar = useMutation({
-    mutationFn: async () => {
-      if (!resolvedCompanyId || !agent) throw new Error("Agent company is not selected");
-      const existingMetadata = asRecord(agent.metadata) ?? {};
-      const metadata = { ...existingMetadata };
-      delete metadata.avatarAssetId;
-      return agentsApi.update(agentLookupRef, { metadata }, resolvedCompanyId);
-    },
-    onSuccess: () => {
-      setActionError(null);
-      queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(routeAgentRef) });
-      queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(agentLookupRef) });
-      if (resolvedCompanyId) {
-        queryClient.invalidateQueries({ queryKey: queryKeys.agents.list(resolvedCompanyId) });
-      }
-    },
-    onError: (err) => {
-      setActionError(err instanceof Error ? err.message : "Failed to clear avatar");
-    },
-  });
+  useEffect(() => {
+    return () => {
+      if (avatarObjectUrl) URL.revokeObjectURL(avatarObjectUrl);
+    };
+  }, [avatarObjectUrl]);
+
+  const closeAvatarDialog = useCallback(() => {
+    if (avatarObjectUrl) URL.revokeObjectURL(avatarObjectUrl);
+    setAvatarDialogOpen(false);
+    setAvatarScale(1);
+    setAvatarObjectUrl(null);
+    setAvatarEditorImage(null);
+  }, [avatarObjectUrl]);
+
+  const openAvatarEditor = useCallback((file: File) => {
+    if (!file.type.startsWith("image/")) {
+      setActionError("Please select an image file");
+      return;
+    }
+    if (avatarObjectUrl) URL.revokeObjectURL(avatarObjectUrl);
+    const objectUrl = URL.createObjectURL(file);
+    setActionError(null);
+    setAvatarFileName(file.name || "avatar");
+    setAvatarScale(1);
+    setAvatarObjectUrl(objectUrl);
+    setAvatarEditorImage(objectUrl);
+    setAvatarDialogOpen(true);
+  }, [avatarObjectUrl]);
+
+  const openAvatarDialog = useCallback(() => {
+    setActionError(null);
+    setAvatarScale(1);
+    setAvatarEditorImage(agent?.avatarUrl ?? null);
+    setAvatarFileName(agent?.name || "avatar");
+    setAvatarDialogOpen(true);
+  }, [agent?.avatarUrl, agent?.name]);
+
+  const handleApplyAvatar = useCallback(async (canvas: HTMLCanvasElement) => {
+    try {
+      const outputFile = await canvasToPngFile(canvas, avatarFileName);
+      updateAvatar.mutate(outputFile, {
+        onSuccess: () => closeAvatarDialog(),
+      });
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Avatar upload failed");
+    }
+  }, [avatarFileName, closeAvatarDialog, updateAvatar]);
 
   const resetTaskSession = useMutation({
     mutationFn: (taskKey: string | null) =>
@@ -528,47 +559,24 @@ export function AgentDetail() {
       {/* Header */}
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-3 min-w-0">
-          <AgentIconPicker
-            value={agent.icon}
-            onChange={(icon) => updateIcon.mutate(icon)}
-          >
-            <button className="shrink-0 flex items-center justify-center h-12 w-12 rounded-lg bg-accent hover:bg-accent/80 transition-colors">
-              <AgentIcon icon={agent.icon} avatarUrl={agent.avatarUrl} className="h-6 w-6" />
-            </button>
-          </AgentIconPicker>
-          <input
-            ref={avatarInputRef}
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              if (file) {
-                updateAvatar.mutate(file);
-              }
-              event.currentTarget.value = "";
-            }}
-          />
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => avatarInputRef.current?.click()}
+          <button
+            type="button"
+            onClick={openAvatarDialog}
+            className="group relative shrink-0 h-12 w-12 rounded-full border border-border bg-accent/50 overflow-hidden transition-colors hover:bg-accent"
+            aria-label="Edit avatar"
             disabled={updateAvatar.isPending}
           >
-            <ImageUp className="h-3.5 w-3.5 sm:mr-1" />
-            <span className="hidden sm:inline">{updateAvatar.isPending ? "Uploading…" : "Upload Avatar"}</span>
-          </Button>
-          {agent.avatarAssetId ? (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => clearAvatar.mutate()}
-              disabled={clearAvatar.isPending}
-            >
-              <X className="h-3.5 w-3.5 sm:mr-1" />
-              <span className="hidden sm:inline">Clear</span>
-            </Button>
-          ) : null}
+            {agent.avatarUrl ? (
+              <img src={agent.avatarUrl} alt="" className="h-full w-full object-cover" />
+            ) : (
+              <div className="flex h-full w-full items-center justify-center">
+                <AgentIcon icon={agent.icon} avatarUrl={null} className="h-6 w-6 text-foreground/70" />
+              </div>
+            )}
+            <span className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/50 text-[11px] font-medium text-white opacity-0 transition-opacity group-hover:opacity-100">
+              Edit
+            </span>
+          </button>
           <div className="min-w-0">
             <h2 className="text-2xl font-bold truncate">{agent.name}</h2>
             <p className="text-sm text-muted-foreground truncate">
@@ -696,6 +704,22 @@ export function AgentDetail() {
           This agent is pending board approval and cannot be invoked yet.
         </p>
       )}
+
+      <AvatarEditorDialog
+        open={avatarDialogOpen}
+        image={avatarEditorImage}
+        scale={avatarScale}
+        isSaving={updateAvatar.isPending}
+        onOpenChange={(open) => {
+          if (!open) closeAvatarDialog();
+          else setAvatarDialogOpen(true);
+        }}
+        onScaleChange={setAvatarScale}
+        onSelectImage={openAvatarEditor}
+        onSave={(canvas) => {
+          void handleApplyAvatar(canvas);
+        }}
+      />
 
       {/* Floating Save/Cancel (desktop) */}
       {!isMobile && (
