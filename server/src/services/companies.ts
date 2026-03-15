@@ -29,7 +29,7 @@ export function companyService(db: Db) {
 
   function deriveIssuePrefixBase(name: string) {
     const normalized = name.toUpperCase().replace(/[^A-Z]/g, "");
-    return normalized.slice(0, 3) || ISSUE_PREFIX_FALLBACK;
+    return normalized.slice(0, 4) || ISSUE_PREFIX_FALLBACK;
   }
 
   function suffixForAttempt(attempt: number) {
