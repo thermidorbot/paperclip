@@ -1154,8 +1154,10 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
         const delta = nonEmpty(data.delta);
         const text = nonEmpty(data.text);
         if (delta) {
+          await ctx.onLog("stdout", delta);
           assistantChunks.push(delta);
         } else if (text) {
+          await ctx.onLog("stdout", text);
           assistantChunks.push(text);
         }
         return;
