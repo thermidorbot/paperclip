@@ -264,7 +264,7 @@ export function NewAgent() {
               >
                 {currentReportsTo ? (
                   <>
-                    <AgentIcon icon={currentReportsTo.icon} className="h-3 w-3 text-muted-foreground" />
+                    <AgentIcon icon={currentReportsTo.icon} avatarUrl={currentReportsTo.avatarUrl} className="h-3 w-3 text-muted-foreground" />
                     {`Reports to ${currentReportsTo.name}`}
                   </>
                 ) : (
@@ -294,7 +294,7 @@ export function NewAgent() {
                   )}
                   onClick={() => { setReportsTo(a.id); setReportsToOpen(false); }}
                 >
-                  <AgentIcon icon={a.icon} className="shrink-0 h-3 w-3 text-muted-foreground" />
+                  <AgentIcon icon={a.icon} avatarUrl={a.avatarUrl} className="shrink-0 h-3 w-3 text-muted-foreground" />
                   {a.name}
                   <span className="text-muted-foreground ml-auto">{roleLabels[a.role] ?? a.role}</span>
                 </button>

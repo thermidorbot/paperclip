@@ -65,6 +65,13 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function extractAvatarAssetId(metadata: unknown): string | null {
+  if (!isPlainRecord(metadata)) return null;
+  const value = metadata.avatarAssetId;
+  if (typeof value !== "string" || value.trim().length === 0) return null;
+  return isUuidLike(value) ? value : null;
+}
+
 function jsonEqual(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }
@@ -190,9 +197,12 @@ export function agentService(db: Db) {
   }
 
   function normalizeAgentRow(row: typeof agents.$inferSelect) {
+    const avatarAssetId = extractAvatarAssetId(row.metadata);
     return withUrlKey({
       ...row,
       permissions: normalizeAgentPermissions(row.permissions, row.role),
+      avatarAssetId,
+      avatarUrl: avatarAssetId ? `/api/assets/${avatarAssetId}/content` : null,
     });
   }
 

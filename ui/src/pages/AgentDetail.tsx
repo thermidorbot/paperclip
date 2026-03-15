@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, useRef } from "react";
 import { useParams, useNavigate, Link, Navigate, useBeforeUnload } from "@/lib/router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { agentsApi, type AgentKey, type ClaudeLoginResult } from "../api/agents";
+import { assetsApi } from "../api/assets";
 import { heartbeatsApi } from "../api/heartbeats";
 import { ApiError } from "../api/client";
 import { ChartCard, RunActivityChart, PriorityChart, IssueStatusChart, SuccessRateChart } from "../components/ActivityCharts";
@@ -55,6 +56,8 @@ import {
   ChevronRight,
   ChevronDown,
   ArrowLeft,
+  ImageUp,
+  X,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { AgentIcon, AgentIconPicker } from "../components/AgentIconPicker";
@@ -62,6 +65,7 @@ import { RunTranscriptView, type TranscriptMode } from "../components/transcript
 import { isUuidLike, type Agent, type HeartbeatRun, type HeartbeatRunEvent, type AgentRuntimeState, type LiveEvent, type ActivityEvent } from "@paperclipai/shared";
 import { redactHomePathUserSegments, redactHomePathUserSegmentsInValue } from "@paperclipai/adapter-utils";
 import { agentRouteRef } from "../lib/utils";
+import { normalizeAvatarImage } from "../lib/avatar-image";
 
 const runStatusIcons: Record<string, { icon: typeof CheckCircle2; color: string }> = {
   succeeded: { icon: CheckCircle2, color: "text-green-600 dark:text-green-400" },
@@ -247,6 +251,7 @@ export function AgentDetail() {
   const activeView = urlRunId ? "runs" as AgentDetailView : parseAgentDetailView(urlTab ?? null);
   const [configDirty, setConfigDirty] = useState(false);
   const [configSaving, setConfigSaving] = useState(false);
+  const avatarInputRef = useRef<HTMLInputElement | null>(null);
   const saveConfigActionRef = useRef<(() => void) | null>(null);
   const cancelConfigActionRef = useRef<(() => void) | null>(null);
   const { isMobile } = useSidebar();
@@ -394,6 +399,56 @@ export function AgentDetail() {
     },
   });
 
+  const updateAvatar = useMutation({
+    mutationFn: async (file: File) => {
+      if (!resolvedCompanyId || !agent?.id) throw new Error("Agent company is not selected");
+      const normalized = await normalizeAvatarImage(file);
+      const asset = await assetsApi.uploadImage(
+        resolvedCompanyId,
+        normalized,
+        `agents/${agent.id}/avatar`,
+      );
+      const existingMetadata = asRecord(agent.metadata) ?? {};
+      const metadata = {
+        ...existingMetadata,
+        avatarAssetId: asset.assetId,
+      };
+      return agentsApi.update(agentLookupRef, { metadata }, resolvedCompanyId);
+    },
+    onSuccess: () => {
+      setActionError(null);
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(routeAgentRef) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(agentLookupRef) });
+      if (resolvedCompanyId) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.agents.list(resolvedCompanyId) });
+      }
+    },
+    onError: (err) => {
+      setActionError(err instanceof Error ? err.message : "Avatar upload failed");
+    },
+  });
+
+  const clearAvatar = useMutation({
+    mutationFn: async () => {
+      if (!resolvedCompanyId || !agent) throw new Error("Agent company is not selected");
+      const existingMetadata = asRecord(agent.metadata) ?? {};
+      const metadata = { ...existingMetadata };
+      delete metadata.avatarAssetId;
+      return agentsApi.update(agentLookupRef, { metadata }, resolvedCompanyId);
+    },
+    onSuccess: () => {
+      setActionError(null);
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(routeAgentRef) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(agentLookupRef) });
+      if (resolvedCompanyId) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.agents.list(resolvedCompanyId) });
+      }
+    },
+    onError: (err) => {
+      setActionError(err instanceof Error ? err.message : "Failed to clear avatar");
+    },
+  });
+
   const resetTaskSession = useMutation({
     mutationFn: (taskKey: string | null) =>
       agentsApi.resetSession(agentLookupRef, taskKey, resolvedCompanyId ?? undefined),
@@ -478,9 +533,42 @@ export function AgentDetail() {
             onChange={(icon) => updateIcon.mutate(icon)}
           >
             <button className="shrink-0 flex items-center justify-center h-12 w-12 rounded-lg bg-accent hover:bg-accent/80 transition-colors">
-              <AgentIcon icon={agent.icon} className="h-6 w-6" />
+              <AgentIcon icon={agent.icon} avatarUrl={agent.avatarUrl} className="h-6 w-6" />
             </button>
           </AgentIconPicker>
+          <input
+            ref={avatarInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) {
+                updateAvatar.mutate(file);
+              }
+              event.currentTarget.value = "";
+            }}
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => avatarInputRef.current?.click()}
+            disabled={updateAvatar.isPending}
+          >
+            <ImageUp className="h-3.5 w-3.5 sm:mr-1" />
+            <span className="hidden sm:inline">{updateAvatar.isPending ? "Uploading…" : "Upload Avatar"}</span>
+          </Button>
+          {agent.avatarAssetId ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => clearAvatar.mutate()}
+              disabled={clearAvatar.isPending}
+            >
+              <X className="h-3.5 w-3.5 sm:mr-1" />
+              <span className="hidden sm:inline">Clear</span>
+            </Button>
+          ) : null}
           <div className="min-w-0">
             <h2 className="text-2xl font-bold truncate">{agent.name}</h2>
             <p className="text-sm text-muted-foreground truncate">
