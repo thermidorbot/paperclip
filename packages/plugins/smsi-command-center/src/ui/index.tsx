@@ -8,8 +8,11 @@ import {
 } from "@paperclipai/plugin-sdk/ui";
 import {
   DASHBOARD_METRICS_KEY,
-  PAGE_ROUTE,
+  REQUEST_PIPELINE_KEY,
   SKILLS_CATALOG_KEY,
+  SKILLS_PAGE_ROUTE,
+  WEEKLY_REPORT_DATA_KEY,
+  WEEKLY_REPORT_PAGE_ROUTE,
 } from "../constants.js";
 
 type DashboardAgent = {
@@ -81,6 +84,77 @@ type SkillsCatalog = {
   error?: string;
 };
 
+type RequestPipelineEntry = {
+  commentId: string;
+  issueId: string;
+  issueIdentifier: string | null;
+  issueTitle: string;
+  issueStatus: string;
+  requestSummary: string;
+  requestedAt: string;
+};
+
+type RequestPipelineData = {
+  generatedAt: string;
+  entries: RequestPipelineEntry[];
+  cacheKey: string;
+  error?: string;
+};
+
+type WeeklyReportData = {
+  generatedAt: string;
+  weekStart: string;
+  weekEnd: string;
+  whatWasBuilt: {
+    closedIssueCount: number;
+    closedIssues: Array<{
+      id: string;
+      identifier: string | null;
+      title: string;
+      closedAt: string;
+    }>;
+    commitCount: number;
+    commits: Array<{
+      sha: string;
+      authoredAt: string;
+      subject: string;
+    }>;
+  };
+  whatWasUsed: {
+    runCount: number;
+    successfulRunCount: number;
+    totalInputTokens: number;
+    totalOutputTokens: number;
+    totalCachedInputTokens: number;
+    skillCount: number;
+  };
+  collectingDust: {
+    staleIssueCount: number;
+    staleIssues: Array<{
+      id: string;
+      identifier: string | null;
+      title: string;
+      status: string;
+      updatedAt: string;
+      daysSinceUpdate: number;
+    }>;
+    unusedSkillCount: number;
+    unusedSkills: Array<{
+      id: string;
+      name: string;
+      sourceDirectory: string;
+    }>;
+  };
+  shinyObjectAudit: {
+    newIssueCount: number;
+    completedIssueCount: number;
+    ratio: number;
+  };
+  cacheKey: string;
+  fromCache: boolean;
+  error?: string;
+};
+
 const cardStyle: CSSProperties = {
   border: "1px solid var(--border)",
   borderRadius: "14px",
@@ -129,8 +203,16 @@ function hostPath(companyPrefix: string | null | undefined, suffix: string): str
   return companyPrefix ? `/${companyPrefix}${suffix}` : suffix;
 }
 
-function pluginPagePath(companyPrefix: string | null | undefined): string {
-  return hostPath(companyPrefix, `/${PAGE_ROUTE}`);
+function skillsPagePath(companyPrefix: string | null | undefined): string {
+  return hostPath(companyPrefix, `/${SKILLS_PAGE_ROUTE}`);
+}
+
+function weeklyReportPagePath(companyPrefix: string | null | undefined): string {
+  return hostPath(companyPrefix, `/${WEEKLY_REPORT_PAGE_ROUTE}`);
+}
+
+function issuePath(companyPrefix: string | null | undefined, issueRef: string): string {
+  return hostPath(companyPrefix, `/issues/${issueRef}`);
 }
 
 function lastHeartbeatLabel(lastHeartbeatAt: string | null): string {
@@ -426,27 +508,232 @@ export function SmsiCommandCenterSkillsPage({ context }: PluginPageProps) {
   );
 }
 
-export function SmsiCommandCenterSkillsSidebarEntry({ context }: PluginSidebarProps) {
-  const href = pluginPagePath(context.companyPrefix);
-  const isActive = typeof window !== "undefined" && window.location.pathname === href;
+function issueReference(entry: RequestPipelineEntry): string {
+  return entry.issueIdentifier ?? entry.issueId;
+}
+
+function issueStatusTone(status: string): string {
+  if (status === "done") return "#16a34a";
+  if (status === "in_progress") return "#2563eb";
+  if (status === "blocked") return "#dc2626";
+  if (status === "in_review") return "#d97706";
+  return "#64748b";
+}
+
+export function SmsiCommandCenterWeeklyReportPage({ context }: PluginPageProps) {
+  const companyId = context.companyId ?? null;
+  const [refreshTick, setRefreshTick] = useState(0);
+  const query = usePluginData<WeeklyReportData>(WEEKLY_REPORT_DATA_KEY, { companyId, refreshTick });
+
   return (
-    <a
-      href={href}
-      aria-current={isActive ? "page" : undefined}
-      className={[
-        "flex items-center gap-2.5 px-3 py-2 text-[13px] font-medium transition-colors",
-        isActive ? "bg-accent text-foreground" : "text-foreground/80 hover:bg-accent/50 hover:text-foreground",
-      ].join(" ")}
-    >
-      <span aria-hidden="true" style={{ width: "16px", display: "inline-flex" }}>
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M4 6h16" />
-          <path d="M4 12h16" />
-          <path d="M4 18h10" />
-          <circle cx="18" cy="18" r="2" />
-        </svg>
-      </span>
-      <span className="flex-1 truncate">Skills</span>
-    </a>
+    <section style={{ display: "grid", gap: "14px", padding: "16px" }}>
+      <header style={{ display: "flex", justifyContent: "space-between", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+        <div style={{ display: "grid", gap: "4px" }}>
+          <h1 style={{ margin: 0, fontSize: "22px" }}>Weekly Report</h1>
+          <div style={{ fontSize: "13px", opacity: 0.72 }}>
+            {query.data?.generatedAt ? `Generated ${compactDate(query.data.generatedAt)}` : "Generating..."}
+            {query.data ? ` • ${query.data.fromCache ? "cached" : "fresh"}` : ""}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            setRefreshTick((tick) => tick + 1);
+            query.refresh();
+          }}
+          style={{
+            border: "1px solid var(--border)",
+            borderRadius: "10px",
+            padding: "8px 10px",
+            background: "var(--card)",
+            color: "var(--foreground)",
+            cursor: "pointer",
+          }}
+        >
+          Regenerate
+        </button>
+      </header>
+
+      {query.loading ? <div style={{ fontSize: "13px" }}>Loading weekly report...</div> : null}
+      {query.error ? <div style={{ color: "var(--destructive)", fontSize: "13px" }}>Failed to load weekly report.</div> : null}
+      {query.data?.error ? <div style={{ color: "var(--destructive)", fontSize: "13px" }}>{query.data.error}</div> : null}
+
+      {query.data ? (
+        <div style={{ display: "grid", gap: "12px" }}>
+          <section style={cardStyle}>
+            <strong>What Was Built</strong>
+            <div style={{ fontSize: "13px", opacity: 0.78 }}>
+              Closed issues: {query.data.whatWasBuilt.closedIssueCount} • Commits: {query.data.whatWasBuilt.commitCount}
+            </div>
+            <div style={{ display: "grid", gap: "6px" }}>
+              {query.data.whatWasBuilt.closedIssues.slice(0, 8).map((issue) => (
+                <div key={issue.id} style={rowStyle}>
+                  <span style={{ fontSize: "13px", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {issue.identifier ? `${issue.identifier}: ` : ""}
+                    {issue.title}
+                  </span>
+                  <span style={{ fontSize: "11px", opacity: 0.7 }}>{compactDate(issue.closedAt)}</span>
+                </div>
+              ))}
+            </div>
+            <div style={{ display: "grid", gap: "6px" }}>
+              {query.data.whatWasBuilt.commits.slice(0, 8).map((commit) => (
+                <div key={commit.sha} style={rowStyle}>
+                  <code style={{ fontSize: "11px" }}>{commit.sha.slice(0, 7)}</code>
+                  <span style={{ fontSize: "13px", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {commit.subject}
+                  </span>
+                  <span style={{ fontSize: "11px", opacity: 0.7 }}>{compactDate(commit.authoredAt)}</span>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section style={cardStyle}>
+            <strong>What Was Used</strong>
+            <div style={statsGridStyle}>
+              <div style={statTileStyle}><strong>{query.data.whatWasUsed.runCount}</strong><span style={{ fontSize: "11px", opacity: 0.75 }}>runs</span></div>
+              <div style={statTileStyle}><strong>{query.data.whatWasUsed.successfulRunCount}</strong><span style={{ fontSize: "11px", opacity: 0.75 }}>succeeded</span></div>
+              <div style={statTileStyle}><strong>{query.data.whatWasUsed.totalInputTokens}</strong><span style={{ fontSize: "11px", opacity: 0.75 }}>input tokens</span></div>
+              <div style={statTileStyle}><strong>{query.data.whatWasUsed.totalOutputTokens}</strong><span style={{ fontSize: "11px", opacity: 0.75 }}>output tokens</span></div>
+            </div>
+          </section>
+
+          <section style={cardStyle}>
+            <strong>What&apos;s Collecting Dust</strong>
+            <div style={{ fontSize: "13px", opacity: 0.78 }}>
+              Stale issues: {query.data.collectingDust.staleIssueCount} • Potentially unused skills: {query.data.collectingDust.unusedSkillCount}
+            </div>
+            <div style={{ display: "grid", gap: "6px" }}>
+              {query.data.collectingDust.staleIssues.slice(0, 8).map((issue) => (
+                <div key={issue.id} style={rowStyle}>
+                  <span style={{ fontSize: "13px", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {issue.identifier ? `${issue.identifier}: ` : ""}
+                    {issue.title}
+                  </span>
+                  <span style={{ fontSize: "11px", opacity: 0.7 }}>{issue.daysSinceUpdate}d stale</span>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section style={cardStyle}>
+            <strong>Shiny Object Audit</strong>
+            <div style={{ fontSize: "13px", opacity: 0.78 }}>
+              New issues: {query.data.shinyObjectAudit.newIssueCount} • Completed: {query.data.shinyObjectAudit.completedIssueCount} • Ratio: {query.data.shinyObjectAudit.ratio}
+            </div>
+          </section>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+export function SmsiCommandCenterRequestPipelinePanel({ context }: PluginSidebarProps) {
+  const companyId = context.companyId ?? null;
+  const query = usePluginData<RequestPipelineData>(REQUEST_PIPELINE_KEY, { companyId });
+  return (
+    <section style={{ display: "grid", gap: "8px", padding: "10px 8px" }}>
+      <header style={{ display: "grid", gap: "2px" }}>
+        <strong style={{ fontSize: "12px" }}>Request Pipeline</strong>
+        <span style={{ fontSize: "11px", opacity: 0.7 }}>
+          {query.data?.generatedAt ? `Updated ${compactDate(query.data.generatedAt)}` : "Loading..."}
+        </span>
+      </header>
+
+      {query.loading ? <div style={{ fontSize: "12px", opacity: 0.75 }}>Loading requests...</div> : null}
+      {query.error ? <div style={{ fontSize: "12px", color: "var(--destructive)" }}>Failed to load request pipeline.</div> : null}
+      {query.data?.error ? <div style={{ fontSize: "12px", color: "var(--destructive)" }}>{query.data.error}</div> : null}
+
+      <div style={{ display: "grid", gap: "6px" }}>
+        {(query.data?.entries ?? []).slice(0, 10).map((entry) => {
+          const issueRef = issueReference(entry);
+          return (
+            <a
+              key={entry.commentId}
+              href={issuePath(context.companyPrefix, issueRef)}
+              style={{
+                border: "1px solid color-mix(in srgb, var(--border) 70%, transparent)",
+                borderRadius: "8px",
+                padding: "8px",
+                display: "grid",
+                gap: "4px",
+                textDecoration: "none",
+                color: "inherit",
+                background: "color-mix(in srgb, var(--card) 75%, transparent)",
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", gap: "8px", alignItems: "center" }}>
+                <span style={{ fontSize: "11px", opacity: 0.75 }}>{issueRef}</span>
+                <span
+                  style={{
+                    fontSize: "10px",
+                    color: issueStatusTone(entry.issueStatus),
+                    border: "1px solid currentColor",
+                    borderRadius: "999px",
+                    padding: "1px 6px",
+                    textTransform: "lowercase",
+                  }}
+                >
+                  {entry.issueStatus}
+                </span>
+              </div>
+              <div style={{ fontSize: "12px", fontWeight: 600 }}>{entry.requestSummary}</div>
+              <div style={{ fontSize: "11px", opacity: 0.68 }}>{compactDate(entry.requestedAt)}</div>
+            </a>
+          );
+        })}
+        {(query.data?.entries?.length ?? 0) === 0 && !query.loading ? (
+          <div style={{ fontSize: "12px", opacity: 0.7 }}>No Brad-tagged requests found.</div>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+export function SmsiCommandCenterSkillsSidebarEntry({ context }: PluginSidebarProps) {
+  const skillsHref = skillsPagePath(context.companyPrefix);
+  const weeklyHref = weeklyReportPagePath(context.companyPrefix);
+  const pathName = typeof window !== "undefined" ? window.location.pathname : "";
+  const skillsActive = pathName === skillsHref;
+  const weeklyActive = pathName === weeklyHref;
+  return (
+    <div style={{ display: "grid", gap: "4px" }}>
+      <a
+        href={skillsHref}
+        aria-current={skillsActive ? "page" : undefined}
+        className={[
+          "flex items-center gap-2.5 px-3 py-2 text-[13px] font-medium transition-colors",
+          skillsActive ? "bg-accent text-foreground" : "text-foreground/80 hover:bg-accent/50 hover:text-foreground",
+        ].join(" ")}
+      >
+        <span aria-hidden="true" style={{ width: "16px", display: "inline-flex" }}>
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M4 6h16" />
+            <path d="M4 12h16" />
+            <path d="M4 18h10" />
+            <circle cx="18" cy="18" r="2" />
+          </svg>
+        </span>
+        <span className="flex-1 truncate">Skills</span>
+      </a>
+      <a
+        href={weeklyHref}
+        aria-current={weeklyActive ? "page" : undefined}
+        className={[
+          "flex items-center gap-2.5 px-3 py-2 text-[13px] font-medium transition-colors",
+          weeklyActive ? "bg-accent text-foreground" : "text-foreground/80 hover:bg-accent/50 hover:text-foreground",
+        ].join(" ")}
+      >
+        <span aria-hidden="true" style={{ width: "16px", display: "inline-flex" }}>
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M4 5h16" />
+            <path d="M4 12h10" />
+            <path d="M4 19h16" />
+          </svg>
+        </span>
+        <span className="flex-1 truncate">Weekly Report</span>
+      </a>
+    </div>
   );
 }
