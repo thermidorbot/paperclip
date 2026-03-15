@@ -3,11 +3,9 @@ import {
   EXPORT_NAMES,
   PLUGIN_ID,
   PLUGIN_VERSION,
-  SKILLS_PAGE_ROUTE,
   SKILLS_SCAN_JOB_KEY,
   SLOT_IDS,
   WEEKLY_REPORT_JOB_KEY,
-  WEEKLY_REPORT_PAGE_ROUTE,
 } from "./constants.js";
 
 const manifest: PaperclipPluginManifestV1 = {
@@ -19,8 +17,6 @@ const manifest: PaperclipPluginManifestV1 = {
   author: "SMSI",
   categories: ["automation", "ui"],
   capabilities: [
-    "ui.page.register",
-    "ui.sidebar.register",
     "ui.dashboardWidget.register",
     "events.subscribe",
     "jobs.schedule",
@@ -51,32 +47,6 @@ const manifest: PaperclipPluginManifestV1 = {
   },
   ui: {
     slots: [
-      {
-        type: "page",
-        id: SLOT_IDS.skillsPage,
-        displayName: "Skills",
-        exportName: EXPORT_NAMES.skillsPage,
-        routePath: SKILLS_PAGE_ROUTE,
-      },
-      {
-        type: "page",
-        id: SLOT_IDS.weeklyReportPage,
-        displayName: "Weekly Report",
-        exportName: EXPORT_NAMES.weeklyReportPage,
-        routePath: WEEKLY_REPORT_PAGE_ROUTE,
-      },
-      {
-        type: "sidebar",
-        id: SLOT_IDS.sidebar,
-        displayName: "Skills",
-        exportName: EXPORT_NAMES.sidebar,
-      },
-      {
-        type: "sidebarPanel",
-        id: SLOT_IDS.sidebarPanel,
-        displayName: "Request Pipeline",
-        exportName: EXPORT_NAMES.sidebarPanel,
-      },
       {
         type: "dashboardWidget",
         id: SLOT_IDS.dashboardWidget,
