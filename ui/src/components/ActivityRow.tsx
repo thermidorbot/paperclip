@@ -79,6 +79,16 @@ function entityLink(entityType: string, entityId: string, name?: string | null):
   }
 }
 
+function fallbackEntityName(event: ActivityEvent): string {
+  if (event.entityType === "issue") {
+    const identifier = typeof event.details?.identifier === "string" ? event.details.identifier : null;
+    if (identifier) return identifier;
+    return event.entityId.slice(0, 8);
+  }
+  if (event.entityType === "heartbeat_run") return event.entityId.slice(0, 8);
+  return event.entityId.slice(0, 8);
+}
+
 interface ActivityRowProps {
   event: ActivityEvent;
   agentMap: Map<string, Agent>;
@@ -98,12 +108,13 @@ export function ActivityRow({ event, agentMap, entityNameMap, entityTitleMap, cl
   const name = isHeartbeatEvent
     ? (heartbeatAgentId ? entityNameMap.get(`agent:${heartbeatAgentId}`) : null)
     : entityNameMap.get(`${event.entityType}:${event.entityId}`);
+  const displayName = name ?? fallbackEntityName(event);
 
   const entityTitle = entityTitleMap?.get(`${event.entityType}:${event.entityId}`);
 
   const link = isHeartbeatEvent && heartbeatAgentId
     ? `/agents/${heartbeatAgentId}/runs/${event.entityId}`
-    : entityLink(event.entityType, event.entityId, name);
+    : entityLink(event.entityType, event.entityId, displayName);
 
   const actor = event.actorType === "agent" ? agentMap.get(event.actorId) : null;
   const actorName = actor?.name ?? (event.actorType === "system" ? "System" : event.actorType === "user" ? "Board" : event.actorId || "Unknown");
@@ -117,7 +128,7 @@ export function ActivityRow({ event, agentMap, entityNameMap, entityTitleMap, cl
           className="align-baseline"
         />
         <span className="text-muted-foreground ml-1">{verb} </span>
-        {name && <span className="font-medium">{name}</span>}
+        <span className="font-medium">{displayName}</span>
         {entityTitle && <span className="text-muted-foreground ml-1">— {entityTitle}</span>}
       </p>
       <span className="text-xs text-muted-foreground shrink-0 pt-0.5">{timeAgo(event.createdAt)}</span>

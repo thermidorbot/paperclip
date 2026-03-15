@@ -23,6 +23,7 @@ import { MarkdownBody } from "../components/MarkdownBody";
 import { CopyText } from "../components/CopyText";
 import { EntityRow } from "../components/EntityRow";
 import { Identity } from "../components/Identity";
+import { ActivityRow } from "../components/ActivityRow";
 import { PageSkeleton } from "../components/PageSkeleton";
 import { ScrollToBottom } from "../components/ScrollToBottom";
 import { formatCents, formatDate, relativeTime, formatTokens } from "../lib/utils";
@@ -58,7 +59,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { AgentIcon, AgentIconPicker } from "../components/AgentIconPicker";
 import { RunTranscriptView, type TranscriptMode } from "../components/transcript/RunTranscriptView";
-import { isUuidLike, type Agent, type HeartbeatRun, type HeartbeatRunEvent, type AgentRuntimeState, type LiveEvent } from "@paperclipai/shared";
+import { isUuidLike, type Agent, type HeartbeatRun, type HeartbeatRunEvent, type AgentRuntimeState, type LiveEvent, type ActivityEvent } from "@paperclipai/shared";
 import { redactHomePathUserSegments, redactHomePathUserSegmentsInValue } from "@paperclipai/adapter-utils";
 import { agentRouteRef } from "../lib/utils";
 
@@ -293,10 +294,32 @@ export function AgentDetail() {
     queryFn: () => agentsApi.list(resolvedCompanyId!),
     enabled: !!resolvedCompanyId,
   });
+  const { data: agentActivity } = useQuery({
+    queryKey: queryKeys.activity(resolvedCompanyId!, agent?.id),
+    queryFn: () => activityApi.list(resolvedCompanyId!, { agentId: agent!.id }),
+    enabled: !!resolvedCompanyId && !!agent?.id,
+  });
 
   const assignedIssues = (allIssues ?? [])
     .filter((i) => i.assigneeAgentId === agent?.id)
     .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+  const agentMap = useMemo(() => {
+    const map = new Map<string, Agent>();
+    for (const item of allAgents ?? []) map.set(item.id, item);
+    return map;
+  }, [allAgents]);
+  const entityNameMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const item of allIssues ?? []) map.set(`issue:${item.id}`, item.identifier ?? item.id.slice(0, 8));
+    for (const item of allAgents ?? []) map.set(`agent:${item.id}`, item.name);
+    return map;
+  }, [allIssues, allAgents]);
+  const entityTitleMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const item of allIssues ?? []) map.set(`issue:${item.id}`, item.title);
+    return map;
+  }, [allIssues]);
+  const recentAgentActivity = useMemo(() => (agentActivity ?? []).slice(0, 10), [agentActivity]);
   const reportsToAgent = (allAgents ?? []).find((a) => a.id === agent?.reportsTo);
   const directReports = (allAgents ?? []).filter((a) => a.reportsTo === agent?.id && a.status !== "terminated");
   const mobileLiveRun = useMemo(
@@ -648,6 +671,10 @@ export function AgentDetail() {
           agent={agent}
           runs={heartbeats ?? []}
           assignedIssues={assignedIssues}
+          recentActivity={recentAgentActivity}
+          agentMap={agentMap}
+          entityNameMap={entityNameMap}
+          entityTitleMap={entityTitleMap}
           runtimeState={runtimeState}
           agentId={agent.id}
           agentRouteId={canonicalAgentRef}
@@ -767,6 +794,10 @@ function AgentOverview({
   agent,
   runs,
   assignedIssues,
+  recentActivity,
+  agentMap,
+  entityNameMap,
+  entityTitleMap,
   runtimeState,
   agentId,
   agentRouteId,
@@ -774,6 +805,10 @@ function AgentOverview({
   agent: Agent;
   runs: HeartbeatRun[];
   assignedIssues: { id: string; title: string; status: string; priority: string; identifier?: string | null; createdAt: Date }[];
+  recentActivity: ActivityEvent[];
+  agentMap: Map<string, Agent>;
+  entityNameMap: Map<string, string>;
+  entityTitleMap: Map<string, string>;
   runtimeState?: AgentRuntimeState;
   agentId: string;
   agentRouteId: string;
@@ -825,6 +860,31 @@ function AgentOverview({
                 +{assignedIssues.length - 10} more issues
               </div>
             )}
+          </div>
+        )}
+      </div>
+
+      {/* Recent Activity */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-medium">Recent Activity</h3>
+          <Link to="/activity" className="text-xs text-muted-foreground hover:text-foreground transition-colors">
+            See All &rarr;
+          </Link>
+        </div>
+        {recentActivity.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No recent activity.</p>
+        ) : (
+          <div className="border border-border rounded-lg divide-y divide-border">
+            {recentActivity.map((event) => (
+              <ActivityRow
+                key={event.id}
+                event={event}
+                agentMap={agentMap}
+                entityNameMap={entityNameMap}
+                entityTitleMap={entityTitleMap}
+              />
+            ))}
           </div>
         )}
       </div>
