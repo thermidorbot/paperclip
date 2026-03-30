@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import type { Issue } from "@paperclipai/shared";
 import { Link } from "@/lib/router";
 import { cn } from "../lib/utils";
+import { usePretext } from "../hooks/usePretext";
 import { PriorityIcon } from "./PriorityIcon";
 import { StatusIcon } from "./StatusIcon";
 
@@ -39,6 +40,13 @@ export function IssueRow({
   const showUnreadSlot = unreadState !== null;
   const showUnreadDot = unreadState === "visible" || unreadState === "fading";
 
+  // Pretext-powered title measurement for smooth reflow
+  const { containerRef: titleRef, style: titleStyle, lineCount } = usePretext(issue.title, {
+    font: "14px Inter, system-ui, sans-serif",
+    lineHeight: 20,
+    maxLines: 2,
+  });
+
   return (
     <Link
       to={`/issues/${issuePathId}`}
@@ -52,7 +60,11 @@ export function IssueRow({
         {mobileLeading ?? <StatusIcon status={issue.status} />}
       </span>
       <span className="flex min-w-0 flex-1 flex-col gap-1 sm:contents">
-        <span className="line-clamp-2 text-sm sm:order-2 sm:min-w-0 sm:flex-1 sm:truncate sm:line-clamp-none">
+        <span
+          ref={titleRef}
+          className="text-sm sm:order-2 sm:min-w-0 sm:flex-1"
+          style={titleStyle}
+        >
           {issue.title}
         </span>
         <span className="flex items-center gap-2 sm:order-1 sm:shrink-0">

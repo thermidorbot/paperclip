@@ -2,6 +2,7 @@ import { Link } from "@/lib/router";
 import { Identity } from "./Identity";
 import { timeAgo } from "../lib/timeAgo";
 import { cn } from "../lib/utils";
+import { usePretext } from "../hooks/usePretext";
 import { deriveProjectUrlKey, type ActivityEvent, type Agent } from "@paperclipai/shared";
 
 const ACTION_VERBS: Record<string, string> = {
@@ -119,9 +120,17 @@ export function ActivityRow({ event, agentMap, entityNameMap, entityTitleMap, cl
   const actor = event.actorType === "agent" ? agentMap.get(event.actorId) : null;
   const actorName = actor?.name ?? (event.actorType === "system" ? "System" : event.actorType === "user" ? "Board" : event.actorId || "Unknown");
 
+  // Build plain text for Pretext measurement
+  const plainText = [actorName, verb, displayName, entityTitle ? `— ${entityTitle}` : ""].filter(Boolean).join(" ");
+  const { containerRef: pretextRef, style: pretextStyle } = usePretext(plainText, {
+    font: "14px Inter, system-ui, sans-serif",
+    lineHeight: 20,
+    maxLines: 2,
+  });
+
   const inner = (
     <div className="flex gap-3">
-      <p className="flex-1 min-w-0 truncate">
+      <p ref={pretextRef} className="flex-1 min-w-0" style={pretextStyle}>
         <Identity
           name={actorName}
           size="xs"

@@ -20,8 +20,11 @@ import { Input } from "@/components/ui/input";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
-import { CircleDot, Plus, Filter, ArrowUpDown, Layers, Check, X, ChevronRight, List, Columns3, User, Search } from "lucide-react";
+import { CircleDot, Plus, Filter, ArrowUpDown, Layers, Check, X, ChevronRight, ChevronDown, List, Columns3, Table2, User, Search } from "lucide-react";
 import { KanbanBoard } from "./KanbanBoard";
+import { IssuesTable } from "./IssuesTable";
+import { InlineEdit } from "./InlineEdit";
+import { AssigneePicker } from "./AssigneePicker";
 import type { Issue } from "@paperclipai/shared";
 
 /* ── Helpers ── */
@@ -43,7 +46,7 @@ export type IssueViewState = {
   sortField: "status" | "priority" | "title" | "created" | "updated";
   sortDir: "asc" | "desc";
   groupBy: "status" | "priority" | "assignee" | "none";
-  viewMode: "list" | "board";
+  viewMode: "list" | "board" | "table";
   collapsedGroups: string[];
 };
 
@@ -138,6 +141,166 @@ function countActiveFilters(state: IssueViewState): number {
   return count;
 }
 
+/* ── List row with sub-issues + inline editing ── */
+
+interface ListIssueWithChildrenProps {
+  issue: Issue;
+  issueLinkState?: unknown;
+  liveIssueIds?: Set<string>;
+  agents?: Agent[];
+  currentUserId?: string | null;
+  agentName: (id: string | null) => string | null;
+  onUpdateIssue: (id: string, data: Record<string, unknown>) => void;
+  selectedIssueId?: string | null;
+  onSelectIssue?: (id: string) => void;
+  childrenMap: Map<string, Issue[]>;
+  expandedParents: Set<string>;
+  onToggleExpand: (id: string) => void;
+  indent: number;
+}
+
+function ListIssueWithChildren({
+  issue,
+  issueLinkState,
+  liveIssueIds,
+  agents,
+  currentUserId,
+  agentName,
+  onUpdateIssue,
+  selectedIssueId,
+  onSelectIssue,
+  childrenMap,
+  expandedParents,
+  onToggleExpand,
+  indent,
+}: ListIssueWithChildrenProps) {
+  const children = childrenMap.get(issue.id);
+  const hasChildren = !!children && children.length > 0;
+  const isExpanded = expandedParents.has(issue.id);
+
+  return (
+    <>
+      <IssueRow
+        issue={issue}
+        issueLinkState={issueLinkState}
+        desktopLeadingSpacer
+        className={cn(selectedIssueId === issue.id && "bg-accent/50")}
+        mobileLeading={(
+          <span className="flex items-center gap-1" onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}>
+            {hasChildren && (
+              <button onClick={() => onToggleExpand(issue.id)} className="p-0.5 rounded hover:bg-accent/50 text-muted-foreground">
+                {isExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+              </button>
+            )}
+            <StatusIcon
+              status={issue.status}
+              onChange={(s) => onUpdateIssue(issue.id, { status: s })}
+            />
+          </span>
+        )}
+        desktopMetaLeading={(
+          <>
+            {indent > 0 && <span style={{ width: indent * 20 }} className="shrink-0" />}
+            {hasChildren && (
+              <button
+                className="hidden sm:inline-flex p-0.5 rounded hover:bg-accent/50 text-muted-foreground shrink-0"
+                onClick={(e) => { e.preventDefault(); e.stopPropagation(); onToggleExpand(issue.id); }}
+              >
+                {isExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+              </button>
+            )}
+            <span className="hidden sm:inline-flex" onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}>
+              <PriorityIcon
+                priority={issue.priority}
+                onChange={(p) => onUpdateIssue(issue.id, { priority: p })}
+              />
+            </span>
+            <span
+              className="hidden shrink-0 sm:inline-flex"
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
+            >
+              <StatusIcon
+                status={issue.status}
+                onChange={(s) => onUpdateIssue(issue.id, { status: s })}
+              />
+            </span>
+            <span className="shrink-0 font-mono text-xs text-muted-foreground">
+              {issue.identifier ?? issue.id.slice(0, 8)}
+            </span>
+            {liveIssueIds?.has(issue.id) && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-blue-500/10 px-1.5 py-0.5 sm:gap-1.5 sm:px-2">
+                <span className="relative flex h-2 w-2">
+                  <span className="absolute inline-flex h-full w-full animate-pulse rounded-full bg-blue-400 opacity-75" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-blue-500" />
+                </span>
+                <span className="hidden text-[11px] font-medium text-blue-600 dark:text-blue-400 sm:inline">
+                  Live
+                </span>
+              </span>
+            )}
+          </>
+        )}
+        mobileMeta={timeAgo(issue.updatedAt)}
+        desktopTrailing={(
+          <>
+            {(issue.labels ?? []).length > 0 && (
+              <span className="hidden items-center gap-1 overflow-hidden md:flex md:max-w-[240px]">
+                {(issue.labels ?? []).slice(0, 3).map((label) => (
+                  <span
+                    key={label.id}
+                    className="inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] font-medium"
+                    style={{
+                      borderColor: label.color,
+                      color: label.color,
+                      backgroundColor: `${label.color}1f`,
+                    }}
+                  >
+                    {label.name}
+                  </span>
+                ))}
+                {(issue.labels ?? []).length > 3 && (
+                  <span className="text-[10px] text-muted-foreground">
+                    +{(issue.labels ?? []).length - 3}
+                  </span>
+                )}
+              </span>
+            )}
+            <span onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}>
+              <AssigneePicker
+                issue={issue}
+                agents={agents}
+                currentUserId={currentUserId}
+                agentName={agentName}
+                onAssign={(id, agentId, userId) => onUpdateIssue(id, { assigneeAgentId: agentId, assigneeUserId: userId })}
+                className="w-[180px] shrink-0"
+              />
+            </span>
+          </>
+        )}
+        trailingMeta={formatDate(issue.createdAt)}
+      />
+      {hasChildren && isExpanded && children!.map((child) => (
+        <ListIssueWithChildren
+          key={child.id}
+          issue={child}
+          issueLinkState={issueLinkState}
+          liveIssueIds={liveIssueIds}
+          agents={agents}
+          currentUserId={currentUserId}
+          agentName={agentName}
+          onUpdateIssue={onUpdateIssue}
+          selectedIssueId={selectedIssueId}
+          onSelectIssue={onSelectIssue}
+          childrenMap={childrenMap}
+          expandedParents={expandedParents}
+          onToggleExpand={onToggleExpand}
+          indent={indent + 1}
+        />
+      ))}
+    </>
+  );
+}
+
 /* ── Component ── */
 
 interface Agent {
@@ -196,6 +359,9 @@ export function IssuesList({
   const [issueSearch, setIssueSearch] = useState(initialSearch ?? "");
   const [debouncedIssueSearch, setDebouncedIssueSearch] = useState(issueSearch);
   const normalizedIssueSearch = debouncedIssueSearch.trim();
+  const [selectedIssueId, setSelectedIssueId] = useState<string | null>(null);
+  const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
+  const [expandedParents, setExpandedParents] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     setIssueSearch(initialSearch ?? "");
@@ -305,6 +471,145 @@ export function IssuesList({
     setAssigneeSearch("");
   };
 
+  // Sub-issues: build parent→children map and extract top-level issues
+  const { topLevelIssues, childrenMap } = useMemo(() => {
+    const cMap = new Map<string, Issue[]>();
+    const topLevel: Issue[] = [];
+    for (const issue of filtered) {
+      if (issue.parentId) {
+        const siblings = cMap.get(issue.parentId) ?? [];
+        siblings.push(issue);
+        cMap.set(issue.parentId, siblings);
+      } else {
+        topLevel.push(issue);
+      }
+    }
+    return { topLevelIssues: topLevel, childrenMap: cMap };
+  }, [filtered]);
+
+  const toggleExpand = useCallback((id: string) => {
+    setExpandedParents((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const toggleChecked = useCallback((id: string) => {
+    setCheckedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  // Flatten visible issues for keyboard nav (respects sub-issue expansion)
+  const flatVisibleIds = useMemo(() => {
+    const ids: string[] = [];
+    const walk = (list: Issue[]) => {
+      for (const issue of list) {
+        ids.push(issue.id);
+        if (expandedParents.has(issue.id)) {
+          const children = childrenMap.get(issue.id);
+          if (children) walk(children);
+        }
+      }
+    };
+    walk(topLevelIssues);
+    return ids;
+  }, [topLevelIssues, childrenMap, expandedParents]);
+
+  // Sort handler for table column headers
+  const handleTableSort = useCallback((field: string) => {
+    const fieldMap: Record<string, IssueViewState["sortField"]> = {
+      identifier: "title",
+      title: "title",
+      status: "status",
+      priority: "priority",
+      updated: "updated",
+    };
+    const mapped = fieldMap[field];
+    if (!mapped) return;
+    if (viewState.sortField === mapped) {
+      updateView({ sortDir: viewState.sortDir === "asc" ? "desc" : "asc" });
+    } else {
+      updateView({ sortField: mapped, sortDir: "asc" });
+    }
+  }, [viewState.sortField, viewState.sortDir, updateView]);
+
+  // Keyboard shortcuts
+  const listContainerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      // Don't capture when typing in inputs
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || (e.target as HTMLElement).isContentEditable) return;
+
+      switch (e.key) {
+        case "j": {
+          e.preventDefault();
+          const idx = selectedIssueId ? flatVisibleIds.indexOf(selectedIssueId) : -1;
+          const next = Math.min(idx + 1, flatVisibleIds.length - 1);
+          if (flatVisibleIds[next]) setSelectedIssueId(flatVisibleIds[next]);
+          break;
+        }
+        case "k": {
+          e.preventDefault();
+          const idx = selectedIssueId ? flatVisibleIds.indexOf(selectedIssueId) : 1;
+          const prev = Math.max(idx - 1, 0);
+          if (flatVisibleIds[prev]) setSelectedIssueId(flatVisibleIds[prev]);
+          break;
+        }
+        case "Enter": {
+          if (selectedIssueId) {
+            const issue = filtered.find((i) => i.id === selectedIssueId);
+            if (issue) {
+              window.location.href = `/issues/${issue.identifier ?? issue.id}`;
+            }
+          }
+          break;
+        }
+        case "x": {
+          e.preventDefault();
+          if (selectedIssueId) toggleChecked(selectedIssueId);
+          break;
+        }
+        case "c": {
+          if (!e.metaKey && !e.ctrlKey) {
+            e.preventDefault();
+            openNewIssue(newIssueDefaults());
+          }
+          break;
+        }
+        case "1": {
+          if (!e.metaKey && !e.ctrlKey) {
+            e.preventDefault();
+            updateView({ viewMode: "list" });
+          }
+          break;
+        }
+        case "2": {
+          if (!e.metaKey && !e.ctrlKey) {
+            e.preventDefault();
+            updateView({ viewMode: "board" });
+          }
+          break;
+        }
+        case "3": {
+          if (!e.metaKey && !e.ctrlKey) {
+            e.preventDefault();
+            updateView({ viewMode: "table" });
+          }
+          break;
+        }
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [selectedIssueId, flatVisibleIds, filtered, toggleChecked, openNewIssue, updateView]);
+
   return (
     <div className="space-y-4">
       {/* Toolbar */}
@@ -335,16 +640,23 @@ export function IssuesList({
             <button
               className={`p-1.5 transition-colors ${viewState.viewMode === "list" ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground"}`}
               onClick={() => updateView({ viewMode: "list" })}
-              title="List view"
+              title="List view (1)"
             >
               <List className="h-3.5 w-3.5" />
             </button>
             <button
               className={`p-1.5 transition-colors ${viewState.viewMode === "board" ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground"}`}
               onClick={() => updateView({ viewMode: "board" })}
-              title="Board view"
+              title="Board view (2)"
             >
               <Columns3 className="h-3.5 w-3.5" />
+            </button>
+            <button
+              className={`p-1.5 transition-colors ${viewState.viewMode === "table" ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+              onClick={() => updateView({ viewMode: "table" })}
+              title="Table view (3)"
+            >
+              <Table2 className="h-3.5 w-3.5" />
             </button>
           </div>
 
@@ -501,8 +813,8 @@ export function IssuesList({
             </PopoverContent>
           </Popover>
 
-          {/* Sort (list view only) */}
-          {viewState.viewMode === "list" && (
+          {/* Sort (list/table view) */}
+          {viewState.viewMode !== "board" && (
             <Popover>
               <PopoverTrigger asChild>
                 <Button variant="ghost" size="sm" className="text-xs">
@@ -545,8 +857,8 @@ export function IssuesList({
             </Popover>
           )}
 
-          {/* Group (list view only) */}
-          {viewState.viewMode === "list" && (
+          {/* Group (list/table view) */}
+          {viewState.viewMode !== "board" && (
             <Popover>
               <PopoverTrigger asChild>
                 <Button variant="ghost" size="sm" className="text-xs">
@@ -583,7 +895,7 @@ export function IssuesList({
       {isLoading && <PageSkeleton variant="issues-list" />}
       {error && <p className="text-sm text-destructive">{error.message}</p>}
 
-      {!isLoading && filtered.length === 0 && viewState.viewMode === "list" && (
+      {!isLoading && filtered.length === 0 && viewState.viewMode !== "board" && (
         <EmptyState
           icon={CircleDot}
           message="No issues match the current filters or search."
@@ -598,9 +910,33 @@ export function IssuesList({
           agents={agents}
           liveIssueIds={liveIssueIds}
           onUpdateIssue={onUpdateIssue}
+          childrenMap={childrenMap}
+          expandedParents={expandedParents}
+          onToggleExpand={toggleExpand}
+        />
+      ) : viewState.viewMode === "table" ? (
+        <IssuesTable
+          issues={topLevelIssues}
+          agents={agents}
+          currentUserId={currentUserId}
+          agentName={agentName}
+          liveIssueIds={liveIssueIds}
+          issueLinkState={issueLinkState}
+          onUpdateIssue={onUpdateIssue}
+          sortField={viewState.sortField}
+          sortDir={viewState.sortDir}
+          onSort={handleTableSort}
+          selectedIssueId={selectedIssueId}
+          onSelectIssue={setSelectedIssueId}
+          checkedIds={checkedIds}
+          onToggleChecked={toggleChecked}
+          expandedParents={expandedParents}
+          onToggleExpand={toggleExpand}
+          childrenMap={childrenMap}
         />
       ) : (
-        groupedContent.map((group) => (
+        <div ref={listContainerRef}>
+        {groupedContent.map((group) => (
           <Collapsible
             key={group.key}
             open={!viewState.collapsedGroups.includes(group.key)}
@@ -631,194 +967,28 @@ export function IssuesList({
               </div>
             )}
             <CollapsibleContent>
-              {group.items.map((issue) => (
-                <IssueRow
+              {group.items.filter((i) => !i.parentId).map((issue) => (
+                <ListIssueWithChildren
                   key={issue.id}
                   issue={issue}
                   issueLinkState={issueLinkState}
-                  desktopLeadingSpacer
-                  mobileLeading={(
-                    <span
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                      }}
-                    >
-                      <StatusIcon
-                        status={issue.status}
-                        onChange={(s) => onUpdateIssue(issue.id, { status: s })}
-                      />
-                    </span>
-                  )}
-                  desktopMetaLeading={(
-                    <>
-                      <span className="hidden sm:inline-flex">
-                        <PriorityIcon priority={issue.priority} />
-                      </span>
-                      <span
-                        className="hidden shrink-0 sm:inline-flex"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                        }}
-                      >
-                        <StatusIcon
-                          status={issue.status}
-                          onChange={(s) => onUpdateIssue(issue.id, { status: s })}
-                        />
-                      </span>
-                      <span className="shrink-0 font-mono text-xs text-muted-foreground">
-                        {issue.identifier ?? issue.id.slice(0, 8)}
-                      </span>
-                      {liveIssueIds?.has(issue.id) && (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-blue-500/10 px-1.5 py-0.5 sm:gap-1.5 sm:px-2">
-                          <span className="relative flex h-2 w-2">
-                            <span className="absolute inline-flex h-full w-full animate-pulse rounded-full bg-blue-400 opacity-75" />
-                            <span className="relative inline-flex h-2 w-2 rounded-full bg-blue-500" />
-                          </span>
-                          <span className="hidden text-[11px] font-medium text-blue-600 dark:text-blue-400 sm:inline">
-                            Live
-                          </span>
-                        </span>
-                      )}
-                    </>
-                  )}
-                  mobileMeta={timeAgo(issue.updatedAt)}
-                  desktopTrailing={(
-                    <>
-                      {(issue.labels ?? []).length > 0 && (
-                        <span className="hidden items-center gap-1 overflow-hidden md:flex md:max-w-[240px]">
-                          {(issue.labels ?? []).slice(0, 3).map((label) => (
-                            <span
-                              key={label.id}
-                              className="inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] font-medium"
-                              style={{
-                                borderColor: label.color,
-                                color: label.color,
-                                backgroundColor: `${label.color}1f`,
-                              }}
-                            >
-                              {label.name}
-                            </span>
-                          ))}
-                          {(issue.labels ?? []).length > 3 && (
-                            <span className="text-[10px] text-muted-foreground">
-                              +{(issue.labels ?? []).length - 3}
-                            </span>
-                          )}
-                        </span>
-                      )}
-                      <Popover
-                        open={assigneePickerIssueId === issue.id}
-                        onOpenChange={(open) => {
-                          setAssigneePickerIssueId(open ? issue.id : null);
-                          if (!open) setAssigneeSearch("");
-                        }}
-                      >
-                        <PopoverTrigger asChild>
-                          <button
-                            className="flex w-[180px] shrink-0 items-center rounded-md px-2 py-1 transition-colors hover:bg-accent/50"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                            }}
-                          >
-                            {issue.assigneeAgentId && agentName(issue.assigneeAgentId) ? (
-                              <Identity name={agentName(issue.assigneeAgentId)!} size="sm" />
-                            ) : issue.assigneeUserId ? (
-                              <span className="inline-flex items-center gap-1.5 text-xs">
-                                <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-dashed border-muted-foreground/35 bg-muted/30">
-                                  <User className="h-3 w-3" />
-                                </span>
-                                {formatAssigneeUserLabel(issue.assigneeUserId, currentUserId) ?? "User"}
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-                                <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-dashed border-muted-foreground/35 bg-muted/30">
-                                  <User className="h-3 w-3" />
-                                </span>
-                                Assignee
-                              </span>
-                            )}
-                          </button>
-                        </PopoverTrigger>
-                        <PopoverContent
-                          className="w-56 p-1"
-                          align="end"
-                          onClick={(e) => e.stopPropagation()}
-                          onPointerDownOutside={() => setAssigneeSearch("")}
-                        >
-                          <input
-                            className="mb-1 w-full border-b border-border bg-transparent px-2 py-1.5 text-xs outline-none placeholder:text-muted-foreground/50"
-                            placeholder="Search assignees..."
-                            value={assigneeSearch}
-                            onChange={(e) => setAssigneeSearch(e.target.value)}
-                            autoFocus
-                          />
-                          <div className="max-h-48 overflow-y-auto overscroll-contain">
-                            <button
-                              className={cn(
-                                "flex w-full items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-accent/50",
-                                !issue.assigneeAgentId && !issue.assigneeUserId && "bg-accent",
-                              )}
-                              onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                assignIssue(issue.id, null, null);
-                              }}
-                            >
-                              No assignee
-                            </button>
-                            {currentUserId && (
-                              <button
-                                className={cn(
-                                  "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-accent/50",
-                                  issue.assigneeUserId === currentUserId && "bg-accent",
-                                )}
-                                onClick={(e) => {
-                                  e.preventDefault();
-                                  e.stopPropagation();
-                                  assignIssue(issue.id, null, currentUserId);
-                                }}
-                              >
-                                <User className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                                <span>Me</span>
-                              </button>
-                            )}
-                            {(agents ?? [])
-                              .filter((agent) => {
-                                if (!assigneeSearch.trim()) return true;
-                                return agent.name
-                                  .toLowerCase()
-                                  .includes(assigneeSearch.toLowerCase());
-                              })
-                              .map((agent) => (
-                                <button
-                                  key={agent.id}
-                                  className={cn(
-                                    "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-accent/50",
-                                    issue.assigneeAgentId === agent.id && "bg-accent",
-                                  )}
-                                  onClick={(e) => {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    assignIssue(issue.id, agent.id, null);
-                                  }}
-                                >
-                                  <Identity name={agent.name} size="sm" className="min-w-0" />
-                                </button>
-                              ))}
-                          </div>
-                        </PopoverContent>
-                      </Popover>
-                    </>
-                  )}
-                  trailingMeta={formatDate(issue.createdAt)}
+                  liveIssueIds={liveIssueIds}
+                  agents={agents}
+                  currentUserId={currentUserId}
+                  agentName={agentName}
+                  onUpdateIssue={onUpdateIssue}
+                  selectedIssueId={selectedIssueId}
+                  onSelectIssue={setSelectedIssueId}
+                  childrenMap={childrenMap}
+                  expandedParents={expandedParents}
+                  onToggleExpand={toggleExpand}
+                  indent={0}
                 />
               ))}
             </CollapsibleContent>
           </Collapsible>
-        ))
+        ))}
+        </div>
       )}
     </div>
   );
